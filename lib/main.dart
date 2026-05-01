@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'dart:html' as html;
 
 void main() async {
@@ -38,7 +40,7 @@ class FatalismSurveyApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1A5F7A), // Restored original teal theme
+          seedColor: const Color(0xFF1A5F7A), // Original Teal theme
           primary: const Color(0xFF1A5F7A),
           secondary: const Color(0xFF159895),
         ),
@@ -118,7 +120,6 @@ class _SurveyPageState extends State<SurveyPage> {
       return;
     }
 
-    // Checking if all questions are answered
     if (_sectionAAnswers.length < _sectionAQuestions.length ||
         _sectionBAnswers.length < _sectionBQuestions.length ||
         _sectionCAnswers.length < _sectionCQuestions.length) {
@@ -129,7 +130,7 @@ class _SurveyPageState extends State<SurveyPage> {
     setState(() => _isSubmitting = true);
 
     try {
-      final data = {
+      final submissionData = {
         'age': _ageController.text,
         'gender': _selectedGender,
         'education': _educationController.text,
@@ -147,9 +148,13 @@ class _SurveyPageState extends State<SurveyPage> {
         'submittedAt': FieldValue.serverTimestamp(),
       };
 
-      await FirebaseFirestore.instance.collection('responses').add(data);
+      await FirebaseFirestore.instance.collection('responses').add(submissionData);
 
       if (!mounted) return;
+      
+      // Automatically download individual report PDF
+      await _downloadSinglePDF(submissionData);
+
       _showSuccess();
       _resetForm();
     } catch (e) {
@@ -159,12 +164,69 @@ class _SurveyPageState extends State<SurveyPage> {
     }
   }
 
+  Future<void> _downloadSinglePDF(Map<String, dynamic> data) async {
+    final pdf = pw.Document();
+    final stats = data['stats'] ?? {};
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) => [
+          pw.Header(level: 0, text: "Fatalism Survey Result"),
+          pw.Text("Researcher: Saleha | Dept of Psychology, UOP", style: pw.TextStyle(fontSize: 12)),
+          pw.SizedBox(height: 20),
+          pw.Text("Participant Details", style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+          pw.Bullet(text: "Age: ${data['age']}"),
+          pw.Bullet(text: "Gender: ${data['gender']}"),
+          pw.Bullet(text: "Education: ${data['education']}"),
+          pw.SizedBox(height: 20),
+          pw.Text("Statistical Summary", style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+          pw.Bullet(text: "Section A: Mean=${stats['meanA']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdA']?.toStringAsFixed(2) ?? 'N/A'}"),
+          pw.Bullet(text: "Section B: Mean=${stats['meanB']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdB']?.toStringAsFixed(2) ?? 'N/A'}"),
+          pw.Bullet(text: "Section C: Mean=${stats['meanC']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdC']?.toStringAsFixed(2) ?? 'N/A'}"),
+          pw.SizedBox(height: 20),
+          pw.Text("Responses", style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+          ..._buildPDFSection(data['sectionA'], _sectionAQuestions, "Section A"),
+          ..._buildPDFSection(data['sectionB'], _sectionBQuestions, "Section B"),
+          ..._buildPDFSection(data['sectionC'], _sectionCQuestions, "Section C"),
+        ],
+      ),
+    );
+
+    final bytes = await pdf.save();
+    final blob = html.Blob([bytes], 'application/pdf');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    html.AnchorElement(href: url)
+      ..setAttribute("download", "Fatalism_Report_${data['age']}_${DateTime.now().millisecondsSinceEpoch}.pdf")
+      ..click();
+    html.Url.revokeObjectUrl(url);
+  }
+
+  List<pw.Widget> _buildPDFSection(dynamic answers, List<String> questions, String title) {
+    List<pw.Widget> items = [pw.Padding(padding: const pw.EdgeInsets.only(top: 10, bottom: 5), child: pw.Text(title, style: pw.TextStyle(fontWeight: pw.FontWeight.bold)))];
+    for (int i = 0; i < questions.length; i++) {
+      items.add(pw.Padding(
+        padding: const pw.EdgeInsets.only(bottom: 2),
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text("${i + 1}. ", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+            pw.Expanded(child: pw.Text(questions[i], style: const pw.TextStyle(fontSize: 10))),
+            pw.SizedBox(width: 10),
+            pw.Text("Answer: ${answers[i.toString()] ?? 'N/A'}", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          ],
+        ),
+      ));
+    }
+    return items;
+  }
+
   void _showSuccess() {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Icon(Icons.check_circle, color: Color(0xFF159895), size: 60),
-        content: const Text("Thank you for your contribution to this research. Your response has been securely saved.", textAlign: TextAlign.center),
+        content: const Text("Thank you for your contribution. Your response has been securely saved and your personal report is downloading.", textAlign: TextAlign.center),
         actions: [Center(child: TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Close")))],
       ),
     );
@@ -241,15 +303,16 @@ class _SurveyPageState extends State<SurveyPage> {
   }
 
   Widget _buildAppBar() {
+    final bool isMobile = MediaQuery.of(context).size.width < 600;
     return SliverAppBar(
-      expandedHeight: 140,
+      expandedHeight: isMobile ? 180 : 140,
       pinned: true,
       backgroundColor: Theme.of(context).colorScheme.primary,
       flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
+        titlePadding: EdgeInsets.only(left: 20, bottom: isMobile ? 30 : 16),
         title: GestureDetector(
           onLongPress: _showAdminAccess,
-          child: Text("Fatalism Survey", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 22)),
+          child: Text("Fatalism Survey", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: isMobile ? 18 : 22)),
         ),
         background: Stack(
           children: [
@@ -259,9 +322,9 @@ class _SurveyPageState extends State<SurveyPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text("University of Peshawar (UOP)", style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13)),
-                  Text("Researcher: Saleha", style: GoogleFonts.poppins(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  Text("Department of Psychology", style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11)),
+                  Text("University of Peshawar (UOP)", style: GoogleFonts.poppins(color: Colors.white70, fontSize: isMobile ? 10 : 13)),
+                  Text("Researcher: Saleha", style: GoogleFonts.poppins(color: Colors.white, fontSize: isMobile ? 14 : 18, fontWeight: FontWeight.bold)),
+                  Text("Department of Psychology", style: GoogleFonts.poppins(color: Colors.white54, fontSize: isMobile ? 9 : 11)),
                 ],
               ),
             ),
@@ -283,16 +346,32 @@ class _SurveyPageState extends State<SurveyPage> {
           decoration: const InputDecoration(labelText: "Security Password"),
         ),
         actions: [
-          TextButton(
-            onPressed: () {
-              if (passField.text == "saleha123") {
-                Navigator.pop(ctx);
-                _downloadAllData();
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invalid Password")));
-              }
-            },
-            child: const Text("Download Master Excel"),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextButton(
+                onPressed: () {
+                  if (passField.text == "saleha123") {
+                    Navigator.pop(ctx);
+                    _downloadAllData();
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invalid Password")));
+                  }
+                },
+                child: const Text("Download Master Excel"),
+              ),
+              TextButton(
+                onPressed: () {
+                  if (passField.text == "saleha123") {
+                    Navigator.pop(ctx);
+                    _downloadMasterPDF();
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invalid Password")));
+                  }
+                },
+                child: const Text("Download Master PDF"),
+              ),
+            ],
           )
         ],
       ),
@@ -307,8 +386,7 @@ class _SurveyPageState extends State<SurveyPage> {
       Sheet sheet = excel['Master_Research_Data'];
       excel.delete('Sheet1');
 
-      // Add Headers
-      sheet.appendRow([
+      List<CellValue> headers = [
         TextCellValue('Age'),
         TextCellValue('Gender'),
         TextCellValue('Education'),
@@ -318,19 +396,28 @@ class _SurveyPageState extends State<SurveyPage> {
         TextCellValue('SD (B)'),
         TextCellValue('Mean (C)'),
         TextCellValue('SD (C)'),
-        TextCellValue('Submission Time'),
-      ]);
+      ];
+      
+      for (int i = 1; i <= 10; i++) headers.add(TextCellValue('A$i'));
+      for (int i = 1; i <= 4; i++) headers.add(TextCellValue('B$i'));
+      for (int i = 1; i <= 6; i++) headers.add(TextCellValue('C$i'));
+      headers.add(TextCellValue('Timestamp'));
+
+      sheet.appendRow(headers);
 
       for (var doc in snapshot.docs) {
         final d = doc.data();
         final s = d['stats'] ?? {};
-        
+        final a = d['sectionA'] ?? {};
+        final b = d['sectionB'] ?? {};
+        final c = d['sectionC'] ?? {};
+
         CellValue getVal(dynamic val) {
           if (val == null) return TextCellValue('N/A');
           return DoubleCellValue(val.toDouble());
         }
 
-        sheet.appendRow([
+        List<CellValue> row = [
           TextCellValue(d['age']?.toString() ?? ''),
           TextCellValue(d['gender']?.toString() ?? ''),
           TextCellValue(d['education']?.toString() ?? ''),
@@ -340,8 +427,14 @@ class _SurveyPageState extends State<SurveyPage> {
           getVal(s['sdB']),
           getVal(s['meanC']),
           getVal(s['sdC']),
-          TextCellValue(d['submittedAt']?.toDate().toString() ?? 'N/A'),
-        ]);
+        ];
+
+        for (int i = 0; i < 10; i++) row.add(TextCellValue(a[i.toString()]?.toString() ?? ''));
+        for (int i = 0; i < 4; i++) row.add(TextCellValue(b[i.toString()]?.toString() ?? ''));
+        for (int i = 0; i < 6; i++) row.add(TextCellValue(c[i.toString()]?.toString() ?? ''));
+        
+        row.add(TextCellValue(d['submittedAt']?.toDate().toString() ?? 'N/A'));
+        sheet.appendRow(row);
       }
 
       var fileBytes = excel.save();
@@ -350,12 +443,51 @@ class _SurveyPageState extends State<SurveyPage> {
         final blob = html.Blob([content], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         final url = html.Url.createObjectUrlFromBlob(blob);
         html.AnchorElement(href: url)
-          ..setAttribute("download", "Psychology_Research_Master_Data_${DateTime.now().millisecondsSinceEpoch}.xlsx")
+          ..setAttribute("download", "Psychology_Research_Full_Data_${DateTime.now().millisecondsSinceEpoch}.xlsx")
           ..click();
         html.Url.revokeObjectUrl(url);
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export Error: $e')));
+    }
+  }
+
+  Future<void> _downloadMasterPDF() async {
+    try {
+      final snapshot = await FirebaseFirestore.instance.collection('responses').orderBy('submittedAt', descending: true).get();
+      final pdf = pw.Document();
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final stats = data['stats'] ?? {};
+        pdf.addPage(
+          pw.MultiPage(
+            pageFormat: PdfPageFormat.a4,
+            build: (pw.Context context) => [
+              pw.Header(level: 0, text: "Fatalism Survey Participant Record"),
+              pw.Text("Age: ${data['age']} | Gender: ${data['gender']} | Education: ${data['education']}"),
+              pw.Divider(),
+              pw.Text("Section A: Mean=${stats['meanA']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdA']?.toStringAsFixed(2) ?? 'N/A'}"),
+              pw.Text("Section B: Mean=${stats['meanB']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdB']?.toStringAsFixed(2) ?? 'N/A'}"),
+              pw.Text("Section C: Mean=${stats['meanC']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdC']?.toStringAsFixed(2) ?? 'N/A'}"),
+              pw.SizedBox(height: 10),
+              ..._buildPDFSection(data['sectionA'], _sectionAQuestions, "Section A responses"),
+              ..._buildPDFSection(data['sectionB'], _sectionBQuestions, "Section B responses"),
+              ..._buildPDFSection(data['sectionC'], _sectionCQuestions, "Section C responses"),
+            ],
+          ),
+        );
+      }
+
+      final bytes = await pdf.save();
+      final blob = html.Blob([bytes], 'application/pdf');
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      html.AnchorElement(href: url)
+        ..setAttribute("download", "Master_Research_Report.pdf")
+        ..click();
+      html.Url.revokeObjectUrl(url);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF Export Error: $e')));
     }
   }
 
