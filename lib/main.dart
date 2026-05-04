@@ -113,6 +113,40 @@ class _SurveyPageState extends State<SurveyPage> {
     double sumOfSquaredDiffs = filtered.map((v) => pow(v - mean, 2)).reduce((a, b) => a + b).toDouble();
     return sqrt(sumOfSquaredDiffs / (filtered.length - 1));
   }
+  // Helper to calculate Median
+  double? _calculateMedian(Iterable<int?> values) {
+    final filtered = values.whereType<int>().toList();
+    if (filtered.isEmpty) return null;
+    filtered.sort();
+    int middle = filtered.length ~/ 2;
+    if (filtered.length % 2 == 1) {
+      return filtered[middle].toDouble();
+    } else {
+      return (filtered[middle - 1] + filtered[middle]) / 2.0;
+    }
+  }
+
+  // Helper to calculate Frequency and Percentage of a specific response across a section
+  Map<String, String> _getFreqAndPerc(Iterable<int?> values) {
+    final filtered = values.whereType<int>().toList();
+    if (filtered.isEmpty) return {"freq": "0", "perc": "0%"};
+
+    // Example: Calculating frequency of 'High' scores (4s and 5s)
+    int highScores = filtered.where((v) => v >= 4).length;
+    double percentage = (highScores / filtered.length) * 100;
+
+    return {
+      "freq": highScores.toString(),
+      "perc": "${percentage.toStringAsFixed(1)}%"
+    };
+  }
+
+  // Helper for Excel cell values
+  CellValue _getExcelVal(dynamic val) {
+    if (val == null) return TextCellValue('N/A');
+    if (val is num) return DoubleCellValue(val.toDouble());
+    return TextCellValue(val.toString());
+  }
 
   Future<void> _submitToFirestore() async {
     if (!_formKey.currentState!.validate()) {
@@ -380,24 +414,40 @@ class _SurveyPageState extends State<SurveyPage> {
 
   Future<void> _downloadAllData() async {
     try {
-      final snapshot = await FirebaseFirestore.instance.collection('responses').orderBy('submittedAt', descending: true).get();
+      final snapshot = await FirebaseFirestore.instance
+          .collection('responses')
+          .orderBy('submittedAt', descending: true)
+          .get();
 
       var excel = Excel.createExcel();
       Sheet sheet = excel['Master_Research_Data'];
       excel.delete('Sheet1');
 
+      // --- Updated Headers with Medians ---
       List<CellValue> headers = [
         TextCellValue('Age'),
         TextCellValue('Gender'),
         TextCellValue('Education'),
+        // Section A
         TextCellValue('Mean (A)'),
         TextCellValue('SD (A)'),
+        TextCellValue('Median (A)'),
+        TextCellValue('Freq High (A)'),
+        TextCellValue('Perc High (A)'),
+        // Section B
         TextCellValue('Mean (B)'),
         TextCellValue('SD (B)'),
+        TextCellValue('Median (B)'),
+        TextCellValue('Freq High (B)'),
+        TextCellValue('Perc High (B)'),
+        // Section C
         TextCellValue('Mean (C)'),
         TextCellValue('SD (C)'),
+        TextCellValue('Median (C)'),
+        TextCellValue('Freq High (C)'),
+        TextCellValue('Perc High (C)'),
       ];
-      
+
       for (int i = 1; i <= 10; i++) headers.add(TextCellValue('A$i'));
       for (int i = 1; i <= 4; i++) headers.add(TextCellValue('B$i'));
       for (int i = 1; i <= 6; i++) headers.add(TextCellValue('C$i'));
@@ -408,47 +458,68 @@ class _SurveyPageState extends State<SurveyPage> {
       for (var doc in snapshot.docs) {
         final d = doc.data();
         final s = d['stats'] ?? {};
-        final a = d['sectionA'] ?? {};
-        final b = d['sectionB'] ?? {};
-        final c = d['sectionC'] ?? {};
 
-        CellValue getVal(dynamic val) {
-          if (val == null) return TextCellValue('N/A');
-          return DoubleCellValue(val.toDouble());
-        }
+        final aList = (d['sectionA'] as Map? ?? {}).values.map((v) => int.tryParse(v.toString())).toList();
+        final bList = (d['sectionB'] as Map? ?? {}).values.map((v) => int.tryParse(v.toString())).toList();
+        final cList = (d['sectionC'] as Map? ?? {}).values.map((v) => int.tryParse(v.toString())).toList();
+
+        final aStats = _getFreqAndPerc(aList);
+        final bStats = _getFreqAndPerc(bList);
+        final cStats = _getFreqAndPerc(cList);
 
         List<CellValue> row = [
-          TextCellValue(d['age']?.toString() ?? ''),
-          TextCellValue(d['gender']?.toString() ?? ''),
-          TextCellValue(d['education']?.toString() ?? ''),
-          getVal(s['meanA']),
-          getVal(s['sdA']),
-          getVal(s['meanB']),
-          getVal(s['sdB']),
-          getVal(s['meanC']),
-          getVal(s['sdC']),
+          _getExcelVal(d['age']),
+          _getExcelVal(d['gender']),
+          _getExcelVal(d['education']),
+          // Section A Data
+          _getExcelVal(s['meanA']),
+          _getExcelVal(s['sdA']),
+          _getExcelVal(_calculateMedian(aList)),
+          _getExcelVal(aStats['freq']),
+          _getExcelVal(aStats['perc']),
+          // Section B Data
+          _getExcelVal(s['meanB']),
+          _getExcelVal(s['sdB']),
+          _getExcelVal(_calculateMedian(bList)),
+          _getExcelVal(bStats['freq']),
+          _getExcelVal(bStats['perc']),
+          // Section C Data
+          _getExcelVal(s['meanC']),
+          _getExcelVal(s['sdC']),
+          _getExcelVal(_calculateMedian(cList)),
+          _getExcelVal(cStats['freq']),
+          _getExcelVal(cStats['perc']),
         ];
 
-        for (int i = 0; i < 10; i++) row.add(TextCellValue(a[i.toString()]?.toString() ?? ''));
-        for (int i = 0; i < 4; i++) row.add(TextCellValue(b[i.toString()]?.toString() ?? ''));
-        for (int i = 0; i < 6; i++) row.add(TextCellValue(c[i.toString()]?.toString() ?? ''));
-        
+        final Map aRaw = d['sectionA'] ?? {};
+        final Map bRaw = d['sectionB'] ?? {};
+        final Map cRaw = d['sectionC'] ?? {};
+
+        // Add individual question answers (A1-A10)
+        for (int i = 0; i < 10; i++) row.add(TextCellValue(aRaw[i.toString()]?.toString() ?? ''));
+        // Add individual question answers (B1-B4)
+        for (int i = 0; i < 4; i++) row.add(TextCellValue(bRaw[i.toString()]?.toString() ?? ''));
+        // Add individual question answers (C1-C6)
+        for (int i = 0; i < 6; i++) row.add(TextCellValue(cRaw[i.toString()]?.toString() ?? ''));
+
         row.add(TextCellValue(d['submittedAt']?.toDate().toString() ?? 'N/A'));
         sheet.appendRow(row);
       }
 
-      var fileBytes = excel.save();
-      if (fileBytes != null) {
-        final content = Uint8List.fromList(fileBytes);
-        final blob = html.Blob([content], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      // --- Web Download Logic ---
+      final bytes = excel.save();
+      if (bytes != null) {
+        final blob = html.Blob([Uint8List.fromList(bytes)]);
         final url = html.Url.createObjectUrlFromBlob(blob);
         html.AnchorElement(href: url)
-          ..setAttribute("download", "Psychology_Research_Full_Data_${DateTime.now().millisecondsSinceEpoch}.xlsx")
+          ..setAttribute("download", "Master_Research_Data_${DateTime.now().millisecondsSinceEpoch}.xlsx")
           ..click();
         html.Url.revokeObjectUrl(url);
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export Error: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export Error: $e')));
+      }
     }
   }
 
