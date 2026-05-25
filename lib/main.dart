@@ -378,7 +378,7 @@ class _SurveyPageState extends State<SurveyPage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Researcher Access"),
+        title: const Text("Researcher Access - Saleha Churail"),
         content: TextField(
           controller: passField,
           obscureText: true,
