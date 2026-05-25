@@ -164,6 +164,7 @@ class _SurveyPageState extends State<SurveyPage> {
     setState(() => _isSubmitting = true);
 
     try {
+      final allResponses = [..._sectionAAnswers.values, ..._sectionBAnswers.values, ..._sectionCAnswers.values];
       final submissionData = {
         'age': _ageController.text,
         'gender': _selectedGender,
@@ -172,12 +173,9 @@ class _SurveyPageState extends State<SurveyPage> {
         'sectionB': _sectionBAnswers.map((k, v) => MapEntry(k.toString(), v)),
         'sectionC': _sectionCAnswers.map((k, v) => MapEntry(k.toString(), v)),
         'stats': {
-          'meanA': _calculateMean(_sectionAAnswers.values),
-          'sdA': _calculateSD(_sectionAAnswers.values),
-          'meanB': _calculateMean(_sectionBAnswers.values),
-          'sdB': _calculateSD(_sectionBAnswers.values),
-          'meanC': _calculateMean(_sectionCAnswers.values),
-          'sdC': _calculateSD(_sectionCAnswers.values),
+          'totalMean': _calculateMean(allResponses),
+          'totalSD': _calculateSD(allResponses),
+          'totalMedian': _calculateMedian(allResponses),
         },
         'submittedAt': FieldValue.serverTimestamp(),
       };
@@ -214,10 +212,10 @@ class _SurveyPageState extends State<SurveyPage> {
           pw.Bullet(text: "Gender: ${data['gender']}"),
           pw.Bullet(text: "Education: ${data['education']}"),
           pw.SizedBox(height: 20),
-          pw.Text("Statistical Summary", style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-          pw.Bullet(text: "Section A: Mean=${stats['meanA']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdA']?.toStringAsFixed(2) ?? 'N/A'}"),
-          pw.Bullet(text: "Section B: Mean=${stats['meanB']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdB']?.toStringAsFixed(2) ?? 'N/A'}"),
-          pw.Bullet(text: "Section C: Mean=${stats['meanC']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdC']?.toStringAsFixed(2) ?? 'N/A'}"),
+          pw.Text("Statistical Summary (Overall)", style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+          pw.Bullet(text: "Total Mean: ${stats['totalMean']?.toStringAsFixed(2) ?? 'N/A'}"),
+          pw.Bullet(text: "Total SD: ${stats['totalSD']?.toStringAsFixed(2) ?? 'N/A'}"),
+          pw.Bullet(text: "Total Median: ${stats['totalMedian']?.toStringAsFixed(2) ?? 'N/A'}"),
           pw.SizedBox(height: 20),
           pw.Text("Responses", style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
           ..._buildPDFSection(data['sectionA'], _sectionAQuestions, "Section A"),
@@ -423,29 +421,16 @@ class _SurveyPageState extends State<SurveyPage> {
       Sheet sheet = excel['Master_Research_Data'];
       excel.delete('Sheet1');
 
-      // --- Updated Headers with Medians ---
+      // --- Updated Headers with Total Stats ---
       List<CellValue> headers = [
         TextCellValue('Age'),
         TextCellValue('Gender'),
         TextCellValue('Education'),
-        // Section A
-        TextCellValue('Mean (A)'),
-        TextCellValue('SD (A)'),
-        TextCellValue('Median (A)'),
-        TextCellValue('Freq High (A)'),
-        TextCellValue('Perc High (A)'),
-        // Section B
-        TextCellValue('Mean (B)'),
-        TextCellValue('SD (B)'),
-        TextCellValue('Median (B)'),
-        TextCellValue('Freq High (B)'),
-        TextCellValue('Perc High (B)'),
-        // Section C
-        TextCellValue('Mean (C)'),
-        TextCellValue('SD (C)'),
-        TextCellValue('Median (C)'),
-        TextCellValue('Freq High (C)'),
-        TextCellValue('Perc High (C)'),
+        TextCellValue('Total Mean'),
+        TextCellValue('Total SD'),
+        TextCellValue('Total Median'),
+        TextCellValue('Total Freq High (4-5)'),
+        TextCellValue('Total Perc High (4-5)'),
       ];
 
       for (int i = 1; i <= 10; i++) headers.add(TextCellValue('A$i'));
@@ -457,38 +442,23 @@ class _SurveyPageState extends State<SurveyPage> {
 
       for (var doc in snapshot.docs) {
         final d = doc.data();
-        final s = d['stats'] ?? {};
 
         final aList = (d['sectionA'] as Map? ?? {}).values.map((v) => int.tryParse(v.toString())).toList();
         final bList = (d['sectionB'] as Map? ?? {}).values.map((v) => int.tryParse(v.toString())).toList();
         final cList = (d['sectionC'] as Map? ?? {}).values.map((v) => int.tryParse(v.toString())).toList();
 
-        final aStats = _getFreqAndPerc(aList);
-        final bStats = _getFreqAndPerc(bList);
-        final cStats = _getFreqAndPerc(cList);
+        final allResponses = [...aList, ...bList, ...cList];
+        final totalStats = _getFreqAndPerc(allResponses);
 
         List<CellValue> row = [
           _getExcelVal(d['age']),
           _getExcelVal(d['gender']),
           _getExcelVal(d['education']),
-          // Section A Data
-          _getExcelVal(s['meanA']),
-          _getExcelVal(s['sdA']),
-          _getExcelVal(_calculateMedian(aList)),
-          _getExcelVal(aStats['freq']),
-          _getExcelVal(aStats['perc']),
-          // Section B Data
-          _getExcelVal(s['meanB']),
-          _getExcelVal(s['sdB']),
-          _getExcelVal(_calculateMedian(bList)),
-          _getExcelVal(bStats['freq']),
-          _getExcelVal(bStats['perc']),
-          // Section C Data
-          _getExcelVal(s['meanC']),
-          _getExcelVal(s['sdC']),
-          _getExcelVal(_calculateMedian(cList)),
-          _getExcelVal(cStats['freq']),
-          _getExcelVal(cStats['perc']),
+          _getExcelVal(_calculateMean(allResponses)),
+          _getExcelVal(_calculateSD(allResponses)),
+          _getExcelVal(_calculateMedian(allResponses)),
+          _getExcelVal(totalStats['freq']),
+          _getExcelVal(totalStats['perc']),
         ];
 
         final Map aRaw = d['sectionA'] ?? {};
@@ -530,7 +500,11 @@ class _SurveyPageState extends State<SurveyPage> {
 
       for (var doc in snapshot.docs) {
         final data = doc.data();
-        final stats = data['stats'] ?? {};
+        final aList = (data['sectionA'] as Map? ?? {}).values.map((v) => int.tryParse(v.toString())).toList();
+        final bList = (data['sectionB'] as Map? ?? {}).values.map((v) => int.tryParse(v.toString())).toList();
+        final cList = (data['sectionC'] as Map? ?? {}).values.map((v) => int.tryParse(v.toString())).toList();
+        final allResponses = [...aList, ...bList, ...cList];
+
         pdf.addPage(
           pw.MultiPage(
             pageFormat: PdfPageFormat.a4,
@@ -538,9 +512,7 @@ class _SurveyPageState extends State<SurveyPage> {
               pw.Header(level: 0, text: "Fatalism Survey Participant Record"),
               pw.Text("Age: ${data['age']} | Gender: ${data['gender']} | Education: ${data['education']}"),
               pw.Divider(),
-              pw.Text("Section A: Mean=${stats['meanA']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdA']?.toStringAsFixed(2) ?? 'N/A'}"),
-              pw.Text("Section B: Mean=${stats['meanB']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdB']?.toStringAsFixed(2) ?? 'N/A'}"),
-              pw.Text("Section C: Mean=${stats['meanC']?.toStringAsFixed(2) ?? 'N/A'}, SD=${stats['sdC']?.toStringAsFixed(2) ?? 'N/A'}"),
+              pw.Text("Overall Stats: Mean=${_calculateMean(allResponses)?.toStringAsFixed(2) ?? 'N/A'}, SD=${_calculateSD(allResponses)?.toStringAsFixed(2) ?? 'N/A'}, Median=${_calculateMedian(allResponses)?.toStringAsFixed(2) ?? 'N/A'}"),
               pw.SizedBox(height: 10),
               ..._buildPDFSection(data['sectionA'], _sectionAQuestions, "Section A responses"),
               ..._buildPDFSection(data['sectionB'], _sectionBQuestions, "Section B responses"),
