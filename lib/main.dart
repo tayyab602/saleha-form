@@ -212,15 +212,13 @@ class _SurveyPageState extends State<SurveyPage> {
           pw.Bullet(text: "Gender: ${data['gender']}"),
           pw.Bullet(text: "Education: ${data['education']}"),
           pw.SizedBox(height: 20),
-          pw.Text("Statistical Summary (Overall)", style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-          pw.Bullet(text: "Total Mean: ${stats['totalMean']?.toStringAsFixed(2) ?? 'N/A'}"),
-          pw.Bullet(text: "Total SD: ${stats['totalSD']?.toStringAsFixed(2) ?? 'N/A'}"),
-          pw.Bullet(text: "Total Median: ${stats['totalMedian']?.toStringAsFixed(2) ?? 'N/A'}"),
+          pw.Text("Statistical Summary", style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+          pw.Bullet(text: "Mean: ${stats['totalMean']?.toStringAsFixed(2) ?? 'N/A'}"),
+          pw.Bullet(text: "Standard Deviation: ${stats['totalSD']?.toStringAsFixed(2) ?? 'N/A'}"),
+          pw.Bullet(text: "Median: ${stats['totalMedian']?.toStringAsFixed(2) ?? 'N/A'}"),
           pw.SizedBox(height: 20),
           pw.Text("Responses", style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-          ..._buildPDFSection(data['sectionA'], _sectionAQuestions, "Section A"),
-          ..._buildPDFSection(data['sectionB'], _sectionBQuestions, "Section B"),
-          ..._buildPDFSection(data['sectionC'], _sectionCQuestions, "Section C"),
+          ..._buildPDFResponses(data),
         ],
       ),
     );
@@ -234,22 +232,31 @@ class _SurveyPageState extends State<SurveyPage> {
     html.Url.revokeObjectUrl(url);
   }
 
-  List<pw.Widget> _buildPDFSection(dynamic answers, List<String> questions, String title) {
-    List<pw.Widget> items = [pw.Padding(padding: const pw.EdgeInsets.only(top: 10, bottom: 5), child: pw.Text(title, style: pw.TextStyle(fontWeight: pw.FontWeight.bold)))];
-    for (int i = 0; i < questions.length; i++) {
-      items.add(pw.Padding(
-        padding: const pw.EdgeInsets.only(bottom: 2),
-        child: pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text("${i + 1}. ", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-            pw.Expanded(child: pw.Text(questions[i], style: const pw.TextStyle(fontSize: 10))),
-            pw.SizedBox(width: 10),
-            pw.Text("Answer: ${answers[i.toString()] ?? 'N/A'}", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-          ],
-        ),
-      ));
+  List<pw.Widget> _buildPDFResponses(Map<String, dynamic> data) {
+    List<pw.Widget> items = [];
+    int counter = 1;
+
+    void addSection(dynamic answers, List<String> questions) {
+      for (int i = 0; i < questions.length; i++) {
+        items.add(pw.Padding(
+          padding: const pw.EdgeInsets.only(bottom: 2),
+          child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text("$counter. ", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+              pw.Expanded(child: pw.Text(questions[i], style: const pw.TextStyle(fontSize: 10))),
+              pw.SizedBox(width: 10),
+              pw.Text("Answer: ${answers[i.toString()] ?? 'N/A'}", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+            ],
+          ),
+        ));
+        counter++;
+      }
     }
+
+    addSection(data['sectionA'], _sectionAQuestions);
+    addSection(data['sectionB'], _sectionBQuestions);
+    addSection(data['sectionC'], _sectionCQuestions);
     return items;
   }
 
@@ -421,22 +428,23 @@ class _SurveyPageState extends State<SurveyPage> {
       Sheet sheet = excel['Master_Research_Data'];
       excel.delete('Sheet1');
 
-      // --- Updated Headers with Total Stats ---
+      // --- Updated Headers ---
       List<CellValue> headers = [
         TextCellValue('Age'),
         TextCellValue('Gender'),
         TextCellValue('Education'),
-        TextCellValue('Total Mean'),
-        TextCellValue('Total SD'),
-        TextCellValue('Total Median'),
-        TextCellValue('Total Freq High (4-5)'),
-        TextCellValue('Total Perc High (4-5)'),
       ];
 
       for (int i = 1; i <= 10; i++) headers.add(TextCellValue('A$i'));
       for (int i = 1; i <= 4; i++) headers.add(TextCellValue('B$i'));
       for (int i = 1; i <= 6; i++) headers.add(TextCellValue('C$i'));
-      headers.add(TextCellValue('Timestamp'));
+
+      headers.addAll([
+        TextCellValue('Mean'),
+        TextCellValue('Median'),
+        TextCellValue('Standard Deviation'),
+        TextCellValue('Timestamp'),
+      ]);
 
       sheet.appendRow(headers);
 
@@ -448,31 +456,29 @@ class _SurveyPageState extends State<SurveyPage> {
         final cList = (d['sectionC'] as Map? ?? {}).values.map((v) => int.tryParse(v.toString())).toList();
 
         final allResponses = [...aList, ...bList, ...cList];
-        final totalStats = _getFreqAndPerc(allResponses);
 
         List<CellValue> row = [
           _getExcelVal(d['age']),
           _getExcelVal(d['gender']),
           _getExcelVal(d['education']),
-          _getExcelVal(_calculateMean(allResponses)),
-          _getExcelVal(_calculateSD(allResponses)),
-          _getExcelVal(_calculateMedian(allResponses)),
-          _getExcelVal(totalStats['freq']),
-          _getExcelVal(totalStats['perc']),
         ];
 
         final Map aRaw = d['sectionA'] ?? {};
         final Map bRaw = d['sectionB'] ?? {};
         final Map cRaw = d['sectionC'] ?? {};
 
-        // Add individual question answers (A1-A10)
+        // Add individual question answers (A1-C6)
         for (int i = 0; i < 10; i++) row.add(TextCellValue(aRaw[i.toString()]?.toString() ?? ''));
-        // Add individual question answers (B1-B4)
         for (int i = 0; i < 4; i++) row.add(TextCellValue(bRaw[i.toString()]?.toString() ?? ''));
-        // Add individual question answers (C1-C6)
         for (int i = 0; i < 6; i++) row.add(TextCellValue(cRaw[i.toString()]?.toString() ?? ''));
 
-        row.add(TextCellValue(d['submittedAt']?.toDate().toString() ?? 'N/A'));
+        row.addAll([
+          _getExcelVal(_calculateMean(allResponses)),
+          _getExcelVal(_calculateMedian(allResponses)),
+          _getExcelVal(_calculateSD(allResponses)),
+          TextCellValue(d['submittedAt']?.toDate().toString() ?? 'N/A'),
+        ]);
+
         sheet.appendRow(row);
       }
 
@@ -512,11 +518,9 @@ class _SurveyPageState extends State<SurveyPage> {
               pw.Header(level: 0, text: "Fatalism Survey Participant Record"),
               pw.Text("Age: ${data['age']} | Gender: ${data['gender']} | Education: ${data['education']}"),
               pw.Divider(),
-              pw.Text("Overall Stats: Mean=${_calculateMean(allResponses)?.toStringAsFixed(2) ?? 'N/A'}, SD=${_calculateSD(allResponses)?.toStringAsFixed(2) ?? 'N/A'}, Median=${_calculateMedian(allResponses)?.toStringAsFixed(2) ?? 'N/A'}"),
+              pw.Text("Stats: Mean=${_calculateMean(allResponses)?.toStringAsFixed(2) ?? 'N/A'}, Standard Deviation=${_calculateSD(allResponses)?.toStringAsFixed(2) ?? 'N/A'}, Median=${_calculateMedian(allResponses)?.toStringAsFixed(2) ?? 'N/A'}"),
               pw.SizedBox(height: 10),
-              ..._buildPDFSection(data['sectionA'], _sectionAQuestions, "Section A responses"),
-              ..._buildPDFSection(data['sectionB'], _sectionBQuestions, "Section B responses"),
-              ..._buildPDFSection(data['sectionC'], _sectionCQuestions, "Section C responses"),
+              ..._buildPDFResponses(data),
             ],
           ),
         );
